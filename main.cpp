@@ -1,42 +1,76 @@
-#include<bits/stdc++.h>
-#include<SDL2/SDL.h>
-using namespace std;
+#include <iostream>
 #include <vector>
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_ttf.h>
 
-// Constants
+
 const int SCREEN_WIDTH = 640;
 const int SCREEN_HEIGHT = 480;
 const int BLOCK_SIZE = 10;
+const int NUM_OBSTACLES = 3;
+const int BONUS_FOOD_INTERVAL = 5;  
 
-// Snake structure
+
+struct Obstacle {
+    int x, y;
+};
+
+
 struct SnakeSegment {
     int x, y;
 };
 
-// Function prototypes
-void render(SDL_Renderer* renderer, const std::vector<SnakeSegment>& snake, const SDL_Point& food);
-void update(std::vector<SnakeSegment>& snake, SDL_Point& food, SDL_Keycode direction, bool& running);
-bool checkCollision(const std::vector<SnakeSegment>& snake, int x, int y);
+
+struct Food {
+    SDL_Point position;
+    bool isBonus;
+};
+
+
+void render(SDL_Renderer* renderer, const std::vector<SnakeSegment>& snake, const Food& food, const std::vector<Obstacle>& obstacles, int score, TTF_Font* font);
+void renderGameOver(SDL_Renderer* renderer, TTF_Font* font, int score);
+void update(std::vector<SnakeSegment>& snake, Food& food, std::vector<Obstacle>& obstacles, SDL_Keycode direction, bool& running, int& score, int& foodCount);
+bool checkCollision(const std::vector<SnakeSegment>& snake, const std::vector<Obstacle>& obstacles, int x, int y);
 
 int main(int argc, char* argv[]) {
-    // Initialize SDL
+    
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
         std::cerr << "SDL initialization failed: " << SDL_GetError() << std::endl;
         return 1;
     }
 
-    // Create window and renderer
+    
+    if (TTF_Init() != 0) {
+        std::cerr << "SDL_ttf initialization failed: " << TTF_GetError() << std::endl;
+        SDL_Quit();
+        return 1;
+    }
+
+    
     SDL_Window* window = SDL_CreateWindow("Snake Game", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                                           SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN);
     SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
 
-    // Initialize variables
-    std::vector<SnakeSegment> snake{{5, 5}}; // Snake starts with one segment at position (5, 5)
-    SDL_Point food = {10, 10}; // Initial food position
-    SDL_Keycode direction = SDLK_RIGHT; // Initial direction
-    bool running = true;
+    
+    TTF_Font* font = TTF_OpenFont("Zebulon Italic.otf", 24);  
 
-    // Main game loop
+    
+    std::vector<SnakeSegment> snake{{5, 5}};
+    Food food{{10, 10}, false};  
+    std::vector<Obstacle> obstacles;
+    int foodCount = 0;
+
+    
+    for (int i = 0; i < NUM_OBSTACLES; ++i) {
+        Obstacle obstacle = {rand() % (SCREEN_WIDTH / BLOCK_SIZE), rand() % (SCREEN_HEIGHT / BLOCK_SIZE)};
+        obstacles.push_back(obstacle);
+    }
+
+    SDL_Keycode direction = SDLK_RIGHT;
+    bool running = true;
+    int score = 0;
+
+    
     while (running) {
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
@@ -66,49 +100,117 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // Update game logic
-        update(snake, food, direction, running);
+        
+        update(snake, food, obstacles, direction, running, score, foodCount);
 
-        // Clear the renderer
-        SDL_SetRenderDrawColor(renderer, 55, 275, 75, 255);
+        
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
 
-        // Render objects
-        render(renderer, snake, food);
+        
+        render(renderer, snake, food, obstacles, score, font);
 
-        // Update screen
+
         SDL_RenderPresent(renderer);
 
-
-
-        // Add a delay to control the speed of the game
-        SDL_Delay(150);
+        
+        SDL_Delay(200);
     }
 
-    // Clean up and quit SDL
+    
+    renderGameOver(renderer, font, score);
+
+    
+    TTF_CloseFont(font);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
+    TTF_Quit();
     SDL_Quit();
 
     return 0;
 }
 
-void render(SDL_Renderer* renderer, const std::vector<SnakeSegment>& snake, const SDL_Point& food) {
-    // Render snake
+void render(SDL_Renderer* renderer, const std::vector<SnakeSegment>& snake, const Food& food, const std::vector<Obstacle>& obstacles, int score, TTF_Font* font) {
+    
+    for (const auto& obstacle : obstacles) {
+        SDL_Rect obstacleRect = {obstacle.x * BLOCK_SIZE, obstacle.y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE};
+        SDL_SetRenderDrawColor(renderer, 128, 128, 128, 255);
+        SDL_RenderFillRect(renderer, &obstacleRect);
+    }
+
+    
     for (const auto& segment : snake) {
         SDL_Rect blockRect = {segment.x * BLOCK_SIZE, segment.y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE};
         SDL_SetRenderDrawColor(renderer, 255, 128, 128, 255);
         SDL_RenderFillRect(renderer, &blockRect);
     }
 
-    // Render food
-    SDL_Rect foodRect = {food.x * BLOCK_SIZE, food.y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE};
-    SDL_SetRenderDrawColor(renderer, 204, 255, 255, 255);
+    
+    SDL_Rect foodRect = {food.position.x * BLOCK_SIZE, food.position.y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE};
+    if (food.isBonus) {
+        
+        SDL_SetRenderDrawColor(renderer, 255, 255, 0, 255);
+    } else {
+        SDL_SetRenderDrawColor(renderer, 204, 255, 255, 255);
+    }
     SDL_RenderFillRect(renderer, &foodRect);
+
+    
+    SDL_Color textColor = {255, 255, 255, 255};
+    std::string scoreText = "Score: " + std::to_string(score);
+
+    SDL_Surface* textSurface = TTF_RenderText_Solid(font, scoreText.c_str(), textColor);
+    SDL_Texture* textTexture = SDL_CreateTextureFromSurface(renderer, textSurface);
+
+    int textWidth, textHeight;
+    SDL_QueryTexture(textTexture, nullptr, nullptr, &textWidth, &textHeight);
+
+    SDL_Rect scoreRect = {100, 10, textWidth, textHeight};
+    SDL_RenderCopy(renderer, textTexture, nullptr, &scoreRect);
+
+    SDL_FreeSurface(textSurface);
+    SDL_DestroyTexture(textTexture);
 }
 
-void update(std::vector<SnakeSegment>& snake, SDL_Point& food, SDL_Keycode direction, bool& running) {
-    // Update snake's position based on the direction
+void renderGameOver(SDL_Renderer* renderer, TTF_Font* font, int score) {
+    
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    SDL_RenderClear(renderer);
+
+    
+    SDL_Color textColor = {255, 0, 0, 255};
+    std::string gameOverText = "Game Over";
+    SDL_Surface* gameOverSurface = TTF_RenderText_Solid(font, gameOverText.c_str(), textColor);
+    SDL_Texture* gameOverTexture = SDL_CreateTextureFromSurface(renderer, gameOverSurface);
+
+    int textWidth, textHeight;
+    SDL_QueryTexture(gameOverTexture, nullptr, nullptr, &textWidth, &textHeight);
+
+    SDL_Rect gameOverRect = {(SCREEN_WIDTH - textWidth) / 2, SCREEN_HEIGHT / 3, textWidth, textHeight};
+    SDL_RenderCopy(renderer, gameOverTexture, nullptr, &gameOverRect);
+
+    SDL_FreeSurface(gameOverSurface);
+    SDL_DestroyTexture(gameOverTexture);
+
+    
+    SDL_Color scoreColor = {255, 255, 255, 255};
+    std::string scoreText = "Score: " + std::to_string(score);
+    SDL_Surface* scoreSurface = TTF_RenderText_Solid(font, scoreText.c_str(), scoreColor);
+    SDL_Texture* scoreTexture = SDL_CreateTextureFromSurface(renderer, scoreSurface);
+
+    SDL_QueryTexture(scoreTexture, nullptr, nullptr, &textWidth, &textHeight);
+
+    SDL_Rect scoreRect = {(SCREEN_WIDTH - textWidth) / 2, SCREEN_HEIGHT / 2, textWidth, textHeight};
+    SDL_RenderCopy(renderer, scoreTexture, nullptr, &scoreRect);
+
+    SDL_FreeSurface(scoreSurface);
+    SDL_DestroyTexture(scoreTexture);
+
+    SDL_RenderPresent(renderer);
+}
+
+void update(std::vector<SnakeSegment>& snake, Food& food, std::vector<Obstacle>& obstacles, SDL_Keycode direction, bool& running, int& score, int& foodCount) {
+    
     int headX = snake.front().x;
     int headY = snake.front().y;
 
@@ -129,34 +231,66 @@ void update(std::vector<SnakeSegment>& snake, SDL_Point& food, SDL_Keycode direc
             break;
     }
 
-    // Check for collisions with food or the snake's body
-    if (headX == food.x && headY == food.y) {
-        // Snake ate the food, so increase its length and generate new food
+    
+    headX = (headX + SCREEN_WIDTH / BLOCK_SIZE) % (SCREEN_WIDTH / BLOCK_SIZE);
+    headY = (headY + SCREEN_HEIGHT / BLOCK_SIZE) % (SCREEN_HEIGHT / BLOCK_SIZE);
+
+
+    if (headX == food.position.x && headY == food.position.y) {
+        
         SnakeSegment newSegment = {headX, headY};
         snake.insert(snake.begin(), newSegment);
-        food.x = rand() % (SCREEN_WIDTH / BLOCK_SIZE);
-        food.y = rand() % (SCREEN_HEIGHT / BLOCK_SIZE);
+        
+        if (food.isBonus) {
+            
+            score += 20;
+            food.isBonus = false;  
+        } else {
+           
+            score += 10;
+            foodCount++;
+
+            
+            if (foodCount % BONUS_FOOD_INTERVAL == 0) {
+            
+                food.position.x = rand() % (SCREEN_WIDTH / BLOCK_SIZE);
+                food.position.y = rand() % (SCREEN_HEIGHT / BLOCK_SIZE);
+                food.isBonus = true;
+            } else {
+                
+                food.position.x = rand() % (SCREEN_WIDTH / BLOCK_SIZE);
+                food.position.y = rand() % (SCREEN_HEIGHT / BLOCK_SIZE);
+                food.isBonus = false;
+            }
+        }
     } else {
-        // Check for collision with the snake's body
-        if (checkCollision(snake, headX, headY)) {
+        
+        if (checkCollision(snake, obstacles, headX, headY)) {
+            
             running = false;
             return;
         }
 
-        // Move the snake by adding a new head and removing the tail
         SnakeSegment newHead = {headX, headY};
         snake.insert(snake.begin(), newHead);
         snake.pop_back();
     }
 }
 
-bool checkCollision(const std::vector<SnakeSegment>& snake, int x, int y) {
-    // Check for collision with the snake's body
-    for (size_t i = 1; i < snake.size(); ++i) {
-        if (snake[i].x == x && snake[i].y == y) {
+bool checkCollision(const std::vector<SnakeSegment>& snake, const std::vector<Obstacle>& obstacles, int x, int y) {
+    
+    for (const auto& obstacle : obstacles) {
+        if (obstacle.x == x && obstacle.y == y) {
             return true;
         }
     }
-    // Check if the snake collided with the screen edges
-    return (x >= SCREEN_WIDTH / BLOCK_SIZE || x < 0 || y >= SCREEN_HEIGHT / BLOCK_SIZE || y < 0);
+
+
+    for (const auto& segment : snake) {
+        if (segment.x == x && segment.y == y) {
+            return true;
+        }
+    }
+
+    return false; 
 }
